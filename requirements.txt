@@ -1,6 +1,5 @@
-
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 langchain
 langchain-core
@@ -9,3 +8,4 @@ langchain-text-splitters
 langchain-google-genai
 faiss-cpu
 requests
+google-generativeai
