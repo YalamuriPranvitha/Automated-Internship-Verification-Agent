@@ -1,4 +1,3 @@
-
 import os
 import requests
 
@@ -7,11 +6,7 @@ import requests
 # TAVILY SEARCH API KEY
 # ============================================================
 
-try:
-    from google.colab import userdata
-    SEARCH_API_KEY = userdata.get("SEARCH_API_KEY")
-except Exception:
-    SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
 
 
 # ============================================================
@@ -21,53 +16,85 @@ except Exception:
 def search_web(query):
 
     if not SEARCH_API_KEY:
+
         return {
             "status": "error",
-            "message": "SEARCH_API_KEY is not configured."
+            "message":
+            "SEARCH_API_KEY is not configured."
         }
+
 
     url = "https://api.tavily.com/search"
 
+
     payload = {
+
         "api_key": SEARCH_API_KEY,
+
         "query": query,
+
         "search_depth": "advanced",
+
         "max_results": 5,
+
         "include_answer": True
     }
+
 
     try:
 
         response = requests.post(
+
             url,
+
             json=payload,
+
             timeout=30
         )
 
+
         response.raise_for_status()
+
 
         data = response.json()
 
+
         results = []
+
 
         for item in data.get("results", []):
 
             results.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "content": item.get("content", "")
+
+                "title":
+                item.get("title", ""),
+
+                "url":
+                item.get("url", ""),
+
+                "content":
+                item.get("content", "")
             })
 
+
         return {
+
             "status": "success",
-            "answer": data.get("answer", ""),
-            "results": results
+
+            "answer":
+            data.get("answer", ""),
+
+            "results":
+            results
         }
+
 
     except Exception as e:
 
         return {
+
             "status": "error",
+
             "message": str(e)
         }
 
@@ -78,7 +105,10 @@ def search_web(query):
 
 def verify_company(company_name):
 
-    query = f'"{company_name}" official company website'
+    query = (
+        f'"{company_name}" '
+        f'official company website'
+    )
 
     return search_web(query)
 
@@ -90,7 +120,9 @@ def verify_company(company_name):
 def verify_company_website(company_name):
 
     query = (
+
         f'"{company_name}" '
+
         f'official website careers contact'
     )
 
@@ -107,8 +139,11 @@ def verify_internship(
 ):
 
     query = (
+
         f'"{company_name}" '
+
         f'"{internship_title}" '
+
         f'internship careers official'
     )
 
@@ -128,22 +163,30 @@ def verify_all(
         company_name
     )
 
+
     website_results = verify_company_website(
         company_name
     )
 
+
     internship_results = verify_internship(
+
         company_name,
+
         internship_title
     )
 
+
     return {
 
-        "company_search": company_results,
+        "company_search":
+        company_results,
 
-        "website_search": website_results,
+        "website_search":
+        website_results,
 
-        "internship_search": internship_results
+        "internship_search":
+        internship_results
     }
 
 
@@ -154,8 +197,11 @@ def verify_all(
 if __name__ == "__main__":
 
     result = verify_internship(
+
         "Microsoft",
+
         "Software Engineering Intern"
     )
+
 
     print(result)
