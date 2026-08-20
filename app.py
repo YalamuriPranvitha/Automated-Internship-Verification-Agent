@@ -1,13 +1,12 @@
 import os
 import re
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from langchain_core.documents import Document
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
@@ -20,7 +19,7 @@ from langchain_community.vectorstores import FAISS
 from web_verification import (
     verify_company,
     verify_company_website,
-    verify_internship
+    verify_internship,
 )
 
 
@@ -28,25 +27,11 @@ from web_verification import (
 # API KEYS
 # ============================================================
 
-try:
-    from google.colab import userdata
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
 
-    GOOGLE_API_KEY = userdata.get("GOOGLE_API_KEY")
-    SEARCH_API_KEY = userdata.get("SEARCH_API_KEY")
-
-    if SEARCH_API_KEY:
-        os.environ["SEARCH_API_KEY"] = SEARCH_API_KEY
-
-except Exception:
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
-
-
-if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not configured.")
-
-if not SEARCH_API_KEY:
-    print("WARNING: SEARCH_API_KEY is not configured.")
+if SEARCH_API_KEY:
+    os.environ["SEARCH_API_KEY"] = SEARCH_API_KEY
 
 
 # ============================================================
@@ -61,18 +46,12 @@ app = FastAPI(
 
 
 # ============================================================
-# GEMMA
+# MODEL CONFIGURATION
 # ============================================================
 
 MODEL_NAME = os.getenv(
     "GEMMA_MODEL",
     "gemma-3-27b-it"
-)
-
-llm = ChatGoogleGenerativeAI(
-    model=MODEL_NAME,
-    google_api_key=GOOGLE_API_KEY,
-    temperature=0.2
 )
 
 
@@ -151,27 +130,69 @@ chunks = splitter.split_documents(documents)
 
 
 # ============================================================
-# EMBEDDINGS
+# INITIALIZE AI COMPONENTS
 # ============================================================
 
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
-    google_api_key=GOOGLE_API_KEY
-)
+llm = None
+retriever = None
 
 
-# ============================================================
-# FAISS VECTOR DATABASE
-# ============================================================
+def initialize_ai():
 
-vectorstore = FAISS.from_documents(
-    chunks,
-    embeddings
-)
+    global llm
+    global retriever
 
-retriever = vectorstore.as_retriever(
-    search_kwargs={"k": 4}
-)
+    if not GOOGLE_API_KEY:
+        print("WARNING: GOOGLE_API_KEY is not configured.")
+
+        return
+
+    try:
+
+        # -----------------------------
+        # GEMMA
+        # -----------------------------
+
+        llm = ChatGoogleGenerativeAI(
+            model=MODEL_NAME,
+            google_api_key=GOOGLE_API_KEY,
+            temperature=0.2
+        )
+
+        # -----------------------------
+        # EMBEDDINGS
+        # -----------------------------
+
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/gemini-embedding-001",
+            google_api_key=GOOGLE_API_KEY
+        )
+
+        # -----------------------------
+        # FAISS
+        # -----------------------------
+
+        vectorstore = FAISS.from_documents(
+            chunks,
+            embeddings
+        )
+
+        retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 4}
+        )
+
+        print("AI components initialized successfully.")
+
+    except Exception as e:
+
+        print(
+            "WARNING: AI initialization failed:",
+            str(e)
+        )
+
+
+# Initialize when application starts
+initialize_ai()
 
 
 # ============================================================
@@ -183,6 +204,9 @@ def search_guidelines(query: str) -> str:
     """
     Search the internship verification knowledge base.
     """
+
+    if retriever is None:
+        return "Knowledge base is unavailable because GOOGLE_API_KEY is not configured."
 
     docs = retriever.invoke(query)
 
@@ -210,6 +234,7 @@ def analyze_risk_indicators(text: str) -> str:
     indicators = []
 
     patterns = {
+
         "Registration fee": [
             "registration fee",
             "registration fees"
@@ -259,10 +284,12 @@ def analyze_risk_indicators(text: str) -> str:
         found = []
 
         for keyword in keywords:
+
             if keyword in text:
                 found.append(keyword)
 
         if found:
+
             indicators.append(
                 f"{category}: {', '.join(found)}"
             )
@@ -306,10 +333,13 @@ def analyze_email(text: str) -> str:
         domain = email.split("@")[-1].lower()
 
         if domain in generic_domains:
+
             results.append(
                 f"{email}: generic email provider."
             )
+
         else:
+
             results.append(
                 f"{email}: custom domain detected."
             )
@@ -367,6 +397,7 @@ Your job is to analyze internship opportunities for engineering
 students.
 
 You have access to:
+
 1. RAG verification guidelines
 2. Risk analysis
 3. Email analysis
@@ -375,6 +406,7 @@ You have access to:
 Use the available evidence carefully.
 
 IMPORTANT:
+
 Never claim that an internship is definitely fraudulent or definitely
 legitimate based only on this analysis.
 
@@ -450,20 +482,17 @@ Company/internship match:
 --------------------------------------------------
 
 - ...
-- ...
 
 --------------------------------------------------
 3. POSITIVE INDICATORS
 --------------------------------------------------
 
 - ...
-- ...
 
 --------------------------------------------------
 4. INFORMATION MISSING
 --------------------------------------------------
 
-- ...
 - ...
 
 --------------------------------------------------
@@ -490,10 +519,13 @@ DISCLAIMER
 --------------------------------------------------
 
 This is an AI-assisted informational risk assessment.
+
 It cannot definitively prove that an internship is genuine or
-fraudulent. Students should independently verify the organization
-through official communication channels before making payments or
-sharing sensitive information.
+fraudulent.
+
+Students should independently verify the organization through
+official communication channels before making payments or sharing
+sensitive information.
 """
 )
 
@@ -522,23 +554,41 @@ def analyze_internship(
 ):
 
     # ----------------------------------------
+    # CHECK AI
+    # ----------------------------------------
+
+    if llm is None:
+
+        raise HTTPException(
+            status_code=500,
+            detail="GOOGLE_API_KEY is not configured correctly on Render."
+        )
+
+
+    # ----------------------------------------
     # RAG
     # ----------------------------------------
 
-    rag_query = (
-        company_name
-        + " "
-        + internship_title
-        + " "
-        + internship_description
-    )
+    if retriever is not None:
 
-    docs = retriever.invoke(rag_query)
+        rag_query = (
+            company_name
+            + " "
+            + internship_title
+            + " "
+            + internship_description
+        )
 
-    guidelines = "\n\n".join(
-        doc.page_content
-        for doc in docs
-    )
+        docs = retriever.invoke(rag_query)
+
+        guidelines = "\n\n".join(
+            doc.page_content
+            for doc in docs
+        )
+
+    else:
+
+        guidelines = knowledge_base
 
 
     # ----------------------------------------
@@ -606,7 +656,9 @@ def analyze_internship(
 def home():
 
     return {
-        "message": "AI Internship Authenticity Checker is running",
+
+        "message":
+        "AI Internship Authenticity Checker is running",
 
         "model": MODEL_NAME,
 
@@ -620,6 +672,27 @@ def home():
             "Risk Analysis",
             "Email Analysis"
         ]
+    }
+
+
+@app.get("/health")
+def health():
+
+    return {
+
+        "status": "running",
+
+        "google_api_configured":
+        bool(GOOGLE_API_KEY),
+
+        "search_api_configured":
+        bool(SEARCH_API_KEY),
+
+        "ai_initialized":
+        llm is not None,
+
+        "rag_initialized":
+        retriever is not None
     }
 
 
@@ -638,9 +711,13 @@ def check_internship(
     )
 
     return {
-        "company": request.company_name,
 
-        "internship": request.internship_title,
+        "company":
+        request.company_name,
 
-        "assessment": result
+        "internship":
+        request.internship_title,
+
+        "assessment":
+        result
     }
