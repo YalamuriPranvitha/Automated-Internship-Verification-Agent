@@ -1,0 +1,11 @@
+
+fastapi
+uvicorn
+pydantic
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-google-genai
+faiss-cpu
+requests
